@@ -274,20 +274,13 @@ PJRT_LoadedExecutable* compile_add_program(PJRT_Client* client) {
   LOG_DEBUG("Entering compile_add_program for client: %p", client);
   try {
     const PJRT_Api* api = GetApi();
-    // const char* hlo_string =
-    // "module @jit_add_matrices attributes {mhlo.num_partitions = 1 : i32, mhlo.num_replicas = 1 : i32} {\n"
-    // "  func.func public @main(%arg0: tensor<2x3xf32>, %arg1: tensor<2x3xf32>) -> (tensor<2x3xf32>) {\n"
-    // "    %0 = stablehlo.add %arg0, %arg1 : tensor<2x3xf32>\n"
-    // "    return %0 : tensor<2x3xf32>\n"
-    // "  }\n"
-    // "}";
     const char* hlo_string =
-        "module @jit_add_vectors attributes {mhlo.num_partitions = 1 : i32, "
+        "module @jit_add_matrices attributes {mhlo.num_partitions = 1 : i32, "
         "mhlo.num_replicas = 1 : i32} {\n"
-        "  func.func public @main(%arg0: tensor<2xf32>, %arg1: tensor<2xf32>) "
-        "-> (tensor<2xf32>) {\n"
-        "    %0 = stablehlo.add %arg0, %arg1 : tensor<2xf32>\n"
-        "    return %0 : tensor<2xf32>\n"
+        "  func.func public @main(%arg0: tensor<2x3xf32>, %arg1: "
+        "tensor<2x3xf32>) -> (tensor<2x3xf32>) {\n"
+        "    %0 = stablehlo.add %arg0, %arg1 : tensor<2x3xf32>\n"
+        "    return %0 : tensor<2x3xf32>\n"
         "  }\n"
         "}";
     PJRT_Program program;
@@ -335,7 +328,6 @@ PJRT_LoadedExecutable* compile_add_program(PJRT_Client* client) {
   }
 }
 
-
 PJRT_Buffer* execute_add(PJRT_LoadedExecutable* executable,
                          PJRT_Buffer* buffer_a, PJRT_Buffer* buffer_b) {
   LOG_DEBUG(
@@ -344,12 +336,14 @@ PJRT_Buffer* execute_add(PJRT_LoadedExecutable* executable,
   try {
     const PJRT_Api* api = GetApi();
 
-    PJRT_LoadedExecutable_Execute_Args execute_args = {}; // <-- Also zero-init the outer struct for safety.
+    PJRT_LoadedExecutable_Execute_Args execute_args =
+        {};  // <-- Also zero-init the outer struct for safety.
     execute_args.struct_size = PJRT_LoadedExecutable_Execute_Args_STRUCT_SIZE;
     execute_args.executable = executable;
 
     // --- START OF CORRECTION ---
-    // Zero-initialize the entire options struct to make all fields 0/nullptr by default.
+    // Zero-initialize the entire options struct to make all fields 0/nullptr by
+    // default.
     PJRT_ExecuteOptions options = {};
     // --- END OF CORRECTION ---
 
@@ -439,22 +433,22 @@ void buffer_to_host(PJRT_Buffer* buffer, void* data_ptr, size_t byte_size) {
   }
   LOG_DEBUG("Exiting buffer_to_host");
 }
-  void destroy_executable(PJRT_LoadedExecutable* executable) {
-    LOG_DEBUG("Entering destroy_executable for executable: %p", executable);
-    if (executable == nullptr) return;
-    try {
-        const PJRT_Api* api = GetApi();
-        PJRT_LoadedExecutable_Destroy_Args args;
-        args.struct_size = PJRT_LoadedExecutable_Destroy_Args_STRUCT_SIZE;
-        args.extension_start = nullptr;
-        args.executable = executable;
-        LOG_DEBUG("Calling PJRT_LoadedExecutable_Destroy");
-        CHECK_ERROR(api->PJRT_LoadedExecutable_Destroy(&args), api);
-        LOG_DEBUG("PJRT_LoadedExecutable_Destroy successful.");
-    } catch (const std::exception& e) {
-        LOG_DEBUG("Exception during executable destruction: %s", e.what());
-        std::cerr << "Exception during executable destruction: " << e.what()
-                  << std::endl;
-    }
+void destroy_executable(PJRT_LoadedExecutable* executable) {
+  LOG_DEBUG("Entering destroy_executable for executable: %p", executable);
+  if (executable == nullptr) return;
+  try {
+    const PJRT_Api* api = GetApi();
+    PJRT_LoadedExecutable_Destroy_Args args;
+    args.struct_size = PJRT_LoadedExecutable_Destroy_Args_STRUCT_SIZE;
+    args.extension_start = nullptr;
+    args.executable = executable;
+    LOG_DEBUG("Calling PJRT_LoadedExecutable_Destroy");
+    CHECK_ERROR(api->PJRT_LoadedExecutable_Destroy(&args), api);
+    LOG_DEBUG("PJRT_LoadedExecutable_Destroy successful.");
+  } catch (const std::exception& e) {
+    LOG_DEBUG("Exception during executable destruction: %s", e.what());
+    std::cerr << "Exception during executable destruction: " << e.what()
+              << std::endl;
+  }
 }
 }

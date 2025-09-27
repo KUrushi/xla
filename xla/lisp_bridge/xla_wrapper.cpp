@@ -274,22 +274,22 @@ PJRT_LoadedExecutable* compile_add_program(PJRT_Client* client) {
   LOG_DEBUG("Entering compile_add_program for client: %p", client);
   try {
     const PJRT_Api* api = GetApi();
-    const char* hlo_string =
-    "module @jit_add_matrices attributes {mhlo.num_partitions = 1 : i32, mhlo.num_replicas = 1 : i32} {\n"
-    "  func.func public @main(%arg0: tensor<2x3xf32>, %arg1: tensor<2x3xf32>) -> (tensor<2x3xf32>) {\n"
-    "    %0 = stablehlo.add %arg0, %arg1 : tensor<2x3xf32>\n"
-    "    return %0 : tensor<2x3xf32>\n"
-    "  }\n"
-    "}";
     // const char* hlo_string =
-    //     "module @jit_add_vectors attributes {mhlo.num_partitions = 1 : i32, "
-    //     "mhlo.num_replicas = 1 : i32} {\n"
-    //     "  func.func public @main(%arg0: tensor<2xf32>, %arg1: tensor<2xf32>) "
-    //     "-> (tensor<2xf32>) {\n"
-    //     "    %0 = stablehlo.add %arg0, %arg1 : tensor<2xf32>\n"
-    //     "    return %0 : tensor<2xf32>\n"
-    //     "  }\n"
-    //     "}";
+    // "module @jit_add_matrices attributes {mhlo.num_partitions = 1 : i32, mhlo.num_replicas = 1 : i32} {\n"
+    // "  func.func public @main(%arg0: tensor<2x3xf32>, %arg1: tensor<2x3xf32>) -> (tensor<2x3xf32>) {\n"
+    // "    %0 = stablehlo.add %arg0, %arg1 : tensor<2x3xf32>\n"
+    // "    return %0 : tensor<2x3xf32>\n"
+    // "  }\n"
+    // "}";
+    const char* hlo_string =
+        "module @jit_add_vectors attributes {mhlo.num_partitions = 1 : i32, "
+        "mhlo.num_replicas = 1 : i32} {\n"
+        "  func.func public @main(%arg0: tensor<2xf32>, %arg1: tensor<2xf32>) "
+        "-> (tensor<2xf32>) {\n"
+        "    %0 = stablehlo.add %arg0, %arg1 : tensor<2xf32>\n"
+        "    return %0 : tensor<2xf32>\n"
+        "  }\n"
+        "}";
     PJRT_Program program;
     program.struct_size = PJRT_Program_STRUCT_SIZE;
     program.extension_start = nullptr;

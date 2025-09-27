@@ -274,6 +274,13 @@ PJRT_LoadedExecutable* compile_add_program(PJRT_Client* client) {
   LOG_DEBUG("Entering compile_add_program for client: %p", client);
   try {
     const PJRT_Api* api = GetApi();
+    // const char* hlo_string =
+    // "module @jit_add_matrices attributes {mhlo.num_partitions = 1 : i32, mhlo.num_replicas = 1 : i32} {\n"
+    // "  func.func public @main(%arg0: tensor<2x3xf32>, %arg1: tensor<2x3xf32>) -> (tensor<2x3xf32>) {\n"
+    // "    %0 = stablehlo.add %arg0, %arg1 : tensor<2x3xf32>\n"
+    // "    return %0 : tensor<2x3xf32>\n"
+    // "  }\n"
+    // "}";
     const char* hlo_string =
         "module @jit_add_vectors attributes {mhlo.num_partitions = 1 : i32, "
         "mhlo.num_replicas = 1 : i32} {\n"
@@ -328,6 +335,7 @@ PJRT_LoadedExecutable* compile_add_program(PJRT_Client* client) {
   }
 }
 
+
 PJRT_Buffer* execute_add(PJRT_LoadedExecutable* executable,
                          PJRT_Buffer* buffer_a, PJRT_Buffer* buffer_b) {
   LOG_DEBUG(
@@ -336,49 +344,48 @@ PJRT_Buffer* execute_add(PJRT_LoadedExecutable* executable,
   try {
     const PJRT_Api* api = GetApi();
 
-    PJRT_LoadedExecutable_Execute_Args execute_args;
-    // ... (setup execute_args as before, but without compilation)
+    PJRT_LoadedExecutable_Execute_Args execute_args = {}; // <-- Also zero-init the outer struct for safety.
     execute_args.struct_size = PJRT_LoadedExecutable_Execute_Args_STRUCT_SIZE;
-    execute_args.extension_start = nullptr;
     execute_args.executable = executable;
-    PJRT_ExecuteOptions options;
+
+    // --- START OF CORRECTION ---
+    // Zero-initialize the entire options struct to make all fields 0/nullptr by default.
+    PJRT_ExecuteOptions options = {};
+    // --- END OF CORRECTION ---
+
+    // Now, populate the fields we care about.
     options.struct_size = PJRT_ExecuteOptions_STRUCT_SIZE;
-    options.extension_start = nullptr;
-    options.launch_id = 0;
-    options.context = nullptr;
-    options.num_send_ops = 0;
-    options.num_recv_ops = 0;
-    options.num_non_donatable_input_indices = 0;
     execute_args.options = &options;
+
     PJRT_Buffer* inputs[] = {buffer_a, buffer_b};
     PJRT_Buffer** inputs_per_device[] = {inputs};
     execute_args.argument_lists = inputs_per_device;
     execute_args.num_devices = 1;
     execute_args.num_args = 2;
-    execute_args.execute_device = nullptr;
+
     PJRT_Buffer* output_buffer = nullptr;
     PJRT_Buffer** output_list[] = {&output_buffer};
     execute_args.output_lists = output_list;
-    PJRT_Event* device_complete_event = nullptr;
-    execute_args.device_complete_events = &device_complete_event;
+
+    PJRT_Event* event_list[1] = {nullptr};
+    execute_args.device_complete_events = event_list;
 
     LOG_DEBUG("Calling PJRT_LoadedExecutable_Execute");
     CHECK_ERROR(api->PJRT_LoadedExecutable_Execute(&execute_args), api);
+
+    PJRT_Event* device_complete_event = event_list[0];
     LOG_DEBUG("PJRT_LoadedExecutable_Execute successful. Event: %p",
               device_complete_event);
 
-    PJRT_Event_Await_Args await_args;
-    // ... (await and destroy event as before)
+    PJRT_Event_Await_Args await_args = {};
     await_args.struct_size = PJRT_Event_Await_Args_STRUCT_SIZE;
-    await_args.extension_start = nullptr;
     await_args.event = device_complete_event;
     LOG_DEBUG("Calling PJRT_Event_Await on event %p", device_complete_event);
     CHECK_ERROR(api->PJRT_Event_Await(&await_args), api);
     LOG_DEBUG("PJRT_Event_Await successful.");
 
-    PJRT_Event_Destroy_Args destroy_event_args;
+    PJRT_Event_Destroy_Args destroy_event_args = {};
     destroy_event_args.struct_size = PJRT_Event_Destroy_Args_STRUCT_SIZE;
-    destroy_event_args.extension_start = nullptr;
     destroy_event_args.event = device_complete_event;
     LOG_DEBUG("Calling PJRT_Event_Destroy");
     CHECK_ERROR(api->PJRT_Event_Destroy(&destroy_event_args), api);
@@ -393,6 +400,7 @@ PJRT_Buffer* execute_add(PJRT_LoadedExecutable* executable,
     return nullptr;
   }
 }
+
 void buffer_to_host(PJRT_Buffer* buffer, void* data_ptr, size_t byte_size) {
   LOG_DEBUG("Entering buffer_to_host for buffer: %p", buffer);
   try {

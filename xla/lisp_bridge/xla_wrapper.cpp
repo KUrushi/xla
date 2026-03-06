@@ -150,12 +150,8 @@ PJRT_Client* create_client() {
     create_args.struct_size = PJRT_Client_Create_Args_STRUCT_SIZE;
     create_args.extension_start = nullptr;
     create_args.client = nullptr;
-
-    // --- CHANGE HERE: Revert to no options ---
     create_args.create_options = nullptr;
     create_args.num_options = 0;
-    // --- END CHANGE ---
-
     create_args.kv_get_callback = nullptr;
     create_args.kv_put_callback = nullptr;
     create_args.kv_try_get_callback = nullptr;
@@ -269,20 +265,20 @@ PJRT_Buffer* create_buffer_from_host(PJRT_Client* client, PJRT_Device* device,
   }
 }
 
-// ** REPLACE THE OLD compile_add_program FUNCTION WITH THIS **
+// ** MODIFIED FUNCTION **
 PJRT_LoadedExecutable* compile_add_program(PJRT_Client* client) {
   LOG_DEBUG("Entering compile_add_program for client: %p", client);
   try {
     const PJRT_Api* api = GetApi();
+    // This MLIR string now defines a function that adds two 2x3 matrices.
     const char* hlo_string =
-        "module @jit_add_matrices attributes {mhlo.num_partitions = 1 : i32, "
-        "mhlo.num_replicas = 1 : i32} {\n"
-        "  func.func public @main(%arg0: tensor<2x3xf32>, %arg1: "
-        "tensor<2x3xf32>) -> (tensor<2x3xf32>) {\n"
+        "module @jit_add_matrices attributes {mhlo.num_partitions = 1 : i32, mhlo.num_replicas = 1 : i32} {\n"
+        "  func.func public @main(%arg0: tensor<2x3xf32>, %arg1: tensor<2x3xf32>) -> (tensor<2x3xf32>) {\n"
         "    %0 = stablehlo.add %arg0, %arg1 : tensor<2x3xf32>\n"
         "    return %0 : tensor<2x3xf32>\n"
         "  }\n"
         "}";
+
     PJRT_Program program;
     program.struct_size = PJRT_Program_STRUCT_SIZE;
     program.extension_start = nullptr;
@@ -290,28 +286,18 @@ PJRT_LoadedExecutable* compile_add_program(PJRT_Client* client) {
     program.code_size = strlen(hlo_string);
     program.format = "mlir";
     program.format_size = strlen("mlir");
-    // ... in compile_add_program ...
-    // 1. xla::CompileOptions オブジェクトを作成
+
     xla::CompileOptions options;
-
-    // 2. 1レプリカ x 1パーティションのデバイス割り当てを作成
     xla::DeviceAssignment device_assignment(1, 1);
-    device_assignment(0, 0) = 0;  // device ID 0 を割り当てる
-
-    // 3. 作成したデバイス割り当てを、options の中の executable_build_options
-    // に設定
+    device_assignment(0, 0) = 0;
     options.executable_build_options.set_device_assignment(device_assignment);
-
-    // 4. options オブジェクト全体をProtoに変換してからシリアライズする
     std::string options_str = options.ToProto()->SerializeAsString();
-    // ...
+
     PJRT_Client_Compile_Args compile_args;
     compile_args.struct_size = PJRT_Client_Compile_Args_STRUCT_SIZE;
     compile_args.extension_start = nullptr;
     compile_args.client = client;
     compile_args.program = &program;
-
-    // --- Pass the serialized options to the C API ---
     compile_args.compile_options = options_str.c_str();
     compile_args.compile_options_size = options_str.length();
 
@@ -336,18 +322,11 @@ PJRT_Buffer* execute_add(PJRT_LoadedExecutable* executable,
   try {
     const PJRT_Api* api = GetApi();
 
-    PJRT_LoadedExecutable_Execute_Args execute_args =
-        {};  // <-- Also zero-init the outer struct for safety.
+    PJRT_LoadedExecutable_Execute_Args execute_args = {};
     execute_args.struct_size = PJRT_LoadedExecutable_Execute_Args_STRUCT_SIZE;
     execute_args.executable = executable;
 
-    // --- START OF CORRECTION ---
-    // Zero-initialize the entire options struct to make all fields 0/nullptr by
-    // default.
     PJRT_ExecuteOptions options = {};
-    // --- END OF CORRECTION ---
-
-    // Now, populate the fields we care about.
     options.struct_size = PJRT_ExecuteOptions_STRUCT_SIZE;
     execute_args.options = &options;
 
@@ -433,22 +412,146 @@ void buffer_to_host(PJRT_Buffer* buffer, void* data_ptr, size_t byte_size) {
   }
   LOG_DEBUG("Exiting buffer_to_host");
 }
-void destroy_executable(PJRT_LoadedExecutable* executable) {
-  LOG_DEBUG("Entering destroy_executable for executable: %p", executable);
-  if (executable == nullptr) return;
+
+// --- Generic compile: accepts arbitrary MLIR string from Lisp ---
+PJRT_LoadedExecutable* compile_program(PJRT_Client* client,
+                                       const char* mlir_string,
+                                       size_t mlir_length) {
+  LOG_DEBUG("Entering compile_program for client: %p, mlir_length: %zu",
+            client, mlir_length);
   try {
     const PJRT_Api* api = GetApi();
-    PJRT_LoadedExecutable_Destroy_Args args;
-    args.struct_size = PJRT_LoadedExecutable_Destroy_Args_STRUCT_SIZE;
-    args.extension_start = nullptr;
-    args.executable = executable;
-    LOG_DEBUG("Calling PJRT_LoadedExecutable_Destroy");
-    CHECK_ERROR(api->PJRT_LoadedExecutable_Destroy(&args), api);
-    LOG_DEBUG("PJRT_LoadedExecutable_Destroy successful.");
+
+    PJRT_Program program;
+    program.struct_size = PJRT_Program_STRUCT_SIZE;
+    program.extension_start = nullptr;
+    program.code = const_cast<char*>(mlir_string);
+    program.code_size = mlir_length;
+    program.format = "mlir";
+    program.format_size = strlen("mlir");
+
+    xla::CompileOptions options;
+    xla::DeviceAssignment device_assignment(1, 1);
+    device_assignment(0, 0) = 0;
+    options.executable_build_options.set_device_assignment(device_assignment);
+    std::string options_str = options.ToProto()->SerializeAsString();
+
+    PJRT_Client_Compile_Args compile_args;
+    compile_args.struct_size = PJRT_Client_Compile_Args_STRUCT_SIZE;
+    compile_args.extension_start = nullptr;
+    compile_args.client = client;
+    compile_args.program = &program;
+    compile_args.compile_options = options_str.c_str();
+    compile_args.compile_options_size = options_str.length();
+
+    LOG_DEBUG("Calling PJRT_Client_Compile");
+    CHECK_ERROR(api->PJRT_Client_Compile(&compile_args), api);
+    LOG_DEBUG("PJRT_Client_Compile successful. Returning Executable: %p",
+              compile_args.executable);
+
+    return compile_args.executable;
   } catch (const std::exception& e) {
-    LOG_DEBUG("Exception during executable destruction: %s", e.what());
-    std::cerr << "Exception during executable destruction: " << e.what()
-              << std::endl;
+    LOG_DEBUG("Exception in compile_program: %s", e.what());
+    std::cerr << "Exception in compile_program: " << e.what() << std::endl;
+    return nullptr;
   }
+}
+
+// --- Generic execute: variable number of input buffers, single output ---
+PJRT_Buffer* execute_program(PJRT_LoadedExecutable* executable,
+                             PJRT_Buffer** input_buffers,
+                             size_t num_inputs) {
+  LOG_DEBUG("Entering execute_program with executable: %p, num_inputs: %zu",
+            executable, num_inputs);
+  try {
+    const PJRT_Api* api = GetApi();
+
+    PJRT_LoadedExecutable_Execute_Args execute_args = {};
+    execute_args.struct_size = PJRT_LoadedExecutable_Execute_Args_STRUCT_SIZE;
+    execute_args.executable = executable;
+
+    PJRT_ExecuteOptions options = {};
+    options.struct_size = PJRT_ExecuteOptions_STRUCT_SIZE;
+    execute_args.options = &options;
+
+    PJRT_Buffer** inputs_per_device[] = {input_buffers};
+    execute_args.argument_lists = inputs_per_device;
+    execute_args.num_devices = 1;
+    execute_args.num_args = num_inputs;
+
+    PJRT_Buffer* output_buffer = nullptr;
+    PJRT_Buffer** output_list[] = {&output_buffer};
+    execute_args.output_lists = output_list;
+
+    PJRT_Event* event_list[1] = {nullptr};
+    execute_args.device_complete_events = event_list;
+
+    LOG_DEBUG("Calling PJRT_LoadedExecutable_Execute");
+    CHECK_ERROR(api->PJRT_LoadedExecutable_Execute(&execute_args), api);
+
+    PJRT_Event* device_complete_event = event_list[0];
+    LOG_DEBUG("PJRT_LoadedExecutable_Execute successful. Event: %p",
+              device_complete_event);
+
+    PJRT_Event_Await_Args await_args = {};
+    await_args.struct_size = PJRT_Event_Await_Args_STRUCT_SIZE;
+    await_args.event = device_complete_event;
+    LOG_DEBUG("Calling PJRT_Event_Await on event %p", device_complete_event);
+    CHECK_ERROR(api->PJRT_Event_Await(&await_args), api);
+    LOG_DEBUG("PJRT_Event_Await successful.");
+
+    PJRT_Event_Destroy_Args destroy_event_args = {};
+    destroy_event_args.struct_size = PJRT_Event_Destroy_Args_STRUCT_SIZE;
+    destroy_event_args.event = device_complete_event;
+    LOG_DEBUG("Calling PJRT_Event_Destroy");
+    CHECK_ERROR(api->PJRT_Event_Destroy(&destroy_event_args), api);
+    LOG_DEBUG("PJRT_Event_Destroy successful.");
+
+    LOG_DEBUG("Exiting execute_program, returning output buffer: %p",
+              output_buffer);
+    return output_buffer;
+  } catch (const std::exception& e) {
+    LOG_DEBUG("Exception in execute_program: %s", e.what());
+    std::cerr << "Exception in execute_program: " << e.what() << std::endl;
+    return nullptr;
+  }
+}
+
+// --- Buffer cleanup ---
+void destroy_buffer(PJRT_Buffer* buffer) {
+  LOG_DEBUG("Entering destroy_buffer for buffer: %p", buffer);
+  if (buffer == nullptr) return;
+  try {
+    const PJRT_Api* api = GetApi();
+    PJRT_Buffer_Destroy_Args args;
+    args.struct_size = PJRT_Buffer_Destroy_Args_STRUCT_SIZE;
+    args.extension_start = nullptr;
+    args.buffer = buffer;
+    LOG_DEBUG("Calling PJRT_Buffer_Destroy");
+    CHECK_ERROR(api->PJRT_Buffer_Destroy(&args), api);
+    LOG_DEBUG("PJRT_Buffer_Destroy successful.");
+  } catch (const std::exception& e) {
+    LOG_DEBUG("Exception in destroy_buffer: %s", e.what());
+    std::cerr << "Exception in destroy_buffer: " << e.what() << std::endl;
+  }
+}
+
+void destroy_executable(PJRT_LoadedExecutable* executable) {
+    LOG_DEBUG("Entering destroy_executable for executable: %p", executable);
+    if (executable == nullptr) return;
+    try {
+        const PJRT_Api* api = GetApi();
+        PJRT_LoadedExecutable_Destroy_Args args;
+        args.struct_size = PJRT_LoadedExecutable_Destroy_Args_STRUCT_SIZE;
+        args.extension_start = nullptr;
+        args.executable = executable;
+        LOG_DEBUG("Calling PJRT_LoadedExecutable_Destroy");
+        CHECK_ERROR(api->PJRT_LoadedExecutable_Destroy(&args), api);
+        LOG_DEBUG("PJRT_LoadedExecutable_Destroy successful.");
+    } catch (const std::exception& e) {
+        LOG_DEBUG("Exception during executable destruction: %s", e.what());
+        std::cerr << "Exception during executable destruction: " << e.what()
+                  << std::endl;
+    }
 }
 }
